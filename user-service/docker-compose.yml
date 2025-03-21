@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # 用户服务API
+  user-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: user-service-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://user-db:27017/user-service
+      JWT_SECRET: your_jwt_secret_key_here
+      JWT_EXPIRES_IN: 1d
+      JWT_REFRESH_SECRET: your_refresh_token_secret_here
+      JWT_REFRESH_EXPIRES_IN: 7d
+      CORS_ORIGIN: '*'
+      EMAIL_ENABLED: 'true'
+      BASE_URL: 'http://localhost:3001'
+    depends_on:
+      - user-db
+    networks:
+      - user-service-network
+    volumes:
+      - ./logs:/usr/src/app/logs
+      - ./config:/usr/src/app/config
+
+  # MongoDB数据库
+  user-db:
+    image: mongo:5.0
+    container_name: user-service-db
+    restart: unless-stopped
+    environment:
+      # 如需设置数据库密码，取消下面注释并修改相应的连接字符串
+      MONGODB_NOOP: 'true'
+    volumes:
+      - user-db-data:/data/db
+      - ./mongodb-init:/docker-entrypoint-initdb.d
+    networks:
+      - user-service-network
+    ports:
+      # 仅用于开发环境调试，生产环境可移除此端口映射
+      - "27018:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+# 定义网络
+networks:
+  user-service-network:
+    driver: bridge
+
+# 定义持久化存储
+volumes:
+  user-db-data:
+    driver: local
