@@ -3,7 +3,7 @@ node_modules/
 npm-debug.log
 yarn-debug.log
 yarn-error.log
-package-lock.json
+!package-lock.json
 
 # 环境变量和配置文件
 .env
@@ -11,7 +11,9 @@ package-lock.json
 .env.development
 .env.test
 .env.production
+!.env.example
 config/smtp.config.js
+!docker-compose.yml
 
 # 日志
 logs/
@@ -19,6 +21,12 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+server-logs/
+*_test_results.log
+
+# 临时脚本
+hash.js
+email-test.js
 
 # 操作系统文件
 .DS_Store
@@ -41,4 +49,17 @@ docker-volumes/
 # 临时文件
 tmp/
 temp/
-.tmp/ 
+.tmp/
+
+# 数据库备份
+*.dump
+*.bak
+mongodb-backups/
+
+# 用户上传的文件
+uploads/
+user-uploads/
+
+# 测试生成的临时文件
+*.test.generated.*
+.nyc_output/ 

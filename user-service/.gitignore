@@ -3,7 +3,6 @@ node_modules/
 npm-debug.log
 yarn-debug.log
 yarn-error.log
-package-lock.json
 
 # 环境变量和配置文件
 .env
@@ -19,6 +18,20 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+server.log
+server_fixed.log
+server_fixed2.log
+
+# 测试结果
+*_test_results.log
+*_test_results_*.log
+test_results/
+
+# 临时脚本
+hash.js
+hash2.js
+hash3.js
+resetUser.js
 
 # 操作系统文件
 .DS_Store
@@ -41,4 +54,14 @@ docker-volumes/
 # 临时文件
 tmp/
 temp/
-.tmp/ 
+.tmp/
+
+# 数据库备份
+*.dump
+*.sql
+*.bak
+
+# 保留文件
+!package-lock.json
+!.env.example
+!docker-compose.yml 

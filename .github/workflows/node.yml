@@ -1,0 +1,52 @@
+name: Node.js CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [16.x, 18.x]
+        mongodb-version: ['5.0', '6.0']
+        
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Start MongoDB
+      uses: supercharge/mongodb-github-action@1.8.0
+      with:
+        mongodb-version: ${{ matrix.mongodb-version }}
+        
+    - name: Install dependencies
+      run: |
+        cd user-service
+        npm ci
+        
+    - name: Lint code
+      run: |
+        cd user-service
+        npm run lint
+        
+    - name: Run tests
+      run: |
+        cd user-service
+        npm test
+      env:
+        CI: true
+        MONGODB_URI: mongodb://localhost:27017/user-service-test
+        JWT_SECRET: test_jwt_secret
+        JWT_REFRESH_SECRET: test_refresh_secret
+        JWT_EXPIRES_IN: 1h
+        JWT_REFRESH_EXPIRES_IN: 7d 
