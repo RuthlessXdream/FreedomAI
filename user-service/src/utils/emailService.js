@@ -8,6 +8,9 @@ class EmailService {
     // 创建Nodemailer传输器
     this.transporter = nodemailer.createTransport(smtpConfig.smtp);
     
+    // 添加配置对象，使其可以被外部访问
+    this.config = smtpConfig;
+    
     // 初始化时验证SMTP配置
     this.verifyConnection();
   }

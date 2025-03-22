@@ -2,9 +2,9 @@
  * FREEDOM AI 邮件测试工具
  * 用于测试不同类型的邮件模板
  */
-const emailService = require('./src/utils/emailService');
-const logger = require('./src/utils/logger');
-const smtpConfig = require('./config/smtp.config');
+const emailService = require('../../src/utils/emailService');
+const logger = require('../../src/utils/logger');
+const smtpConfig = require('../../config/smtp.config');
 const Handlebars = require('handlebars');
 const path = require('path');
 const fs = require('fs');

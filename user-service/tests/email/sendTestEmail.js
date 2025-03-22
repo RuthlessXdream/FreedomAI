@@ -1,8 +1,8 @@
 /**
  * 发送测试邮件的脚本
  */
-const emailService = require('./src/utils/emailService');
-const logger = require('./src/utils/logger');
+const emailService = require('../../src/utils/emailService');
+const logger = require('../../src/utils/logger');
 
 // 收件人邮箱
 const recipientEmail = 'wyk9@outlook.com';

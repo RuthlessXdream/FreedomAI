@@ -8,28 +8,39 @@ const path = require('path');
 const handlebars = require('handlebars');
 
 // 辅助函数：创建并发送令牌
-const createSendToken = (user, statusCode, res) => {
-  // 生成访问令牌
-  const token = user.generateAuthToken();
-  
-  // 生成刷新令牌
-  const refreshToken = user.generateRefreshToken();
-  
-  // 保存刷新令牌到用户记录
-  user.refreshToken = refreshToken;
-  user.lastLogin = Date.now();
-  user.save({ validateBeforeSave: false });
-  
-  // 从响应中移除敏感字段
-  user.password = undefined;
-  user.refreshToken = undefined;
-  
-  res.status(statusCode).json({
-    success: true,
-    token,
-    refreshToken,
-    user
-  });
+const createSendToken = async (user, statusCode, res) => {
+  try {
+    // 生成访问令牌
+    const token = user.generateAuthToken();
+    
+    // 生成刷新令牌（异步操作）
+    const refreshToken = await user.generateRefreshToken();
+    
+    // 更新最后登录时间
+    user.lastLogin = Date.now();
+    await user.save({ validateBeforeSave: false });
+    
+    logger.debug(`用户 ${user._id} 的令牌已更新: lastLogin=${user.lastLogin}, refreshToken=${refreshToken.substring(0, 10)}...`);
+    
+    // 从响应中移除敏感字段
+    const userResponse = user.toObject(); // 转换为普通对象以便修改
+    delete userResponse.password;
+    delete userResponse.refreshToken;
+    
+    res.status(statusCode).json({
+      success: true,
+      token,
+      refreshToken,
+      user: userResponse
+    });
+  } catch (error) {
+    logger.error(`创建令牌错误: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: '服务器错误',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 };
 
 // 生成随机验证码
@@ -95,19 +106,7 @@ exports.register = async (req, res) => {
           email: email,
           verificationCode: verificationCode,
           appName: appName
-        }),
-        attachments: [
-          {
-            filename: 'logo.png',
-            path: path.join(__dirname, '../../logo.png'),
-            cid: 'logo'
-          },
-          {
-            filename: 'logo-small.png',
-            path: path.join(__dirname, '../../logo.png'),
-            cid: 'logo-small'
-          }
-        ]
+        })
       });
       
       logger.info(`验证邮件已发送至 ${email}, MessageID: ${result.messageId}`);
@@ -218,19 +217,7 @@ exports.login = async (req, res) => {
             mfaCode: mfaCode,
             expireMinutes: 5,
             appName: appName
-          }),
-          attachments: [
-            {
-              filename: 'logo.png',
-              path: path.join(__dirname, '../../logo.png'),
-              cid: 'logo'
-            },
-            {
-              filename: 'logo-small.png',
-              path: path.join(__dirname, '../../logo.png'),
-              cid: 'logo-small'
-            }
-          ]
+          })
         });
         
         logger.info(`MFA验证邮件已发送至 ${user.email}`);
@@ -254,7 +241,7 @@ exports.login = async (req, res) => {
     }
     
     // 创建并发送令牌
-    createSendToken(user, 200, res);
+    await createSendToken(user, 200, res);
   } catch (error) {
     logger.error(`登录错误: ${error.message}`);
     res.status(500).json({
@@ -308,7 +295,7 @@ exports.verifyMFA = async (req, res) => {
     await user.save({ validateBeforeSave: false });
     
     // 创建并发送令牌
-    createSendToken(user, 200, res);
+    await createSendToken(user, 200, res);
   } catch (error) {
     logger.error(`MFA验证错误: ${error.message}`);
     res.status(500).json({
@@ -327,17 +314,22 @@ exports.refreshToken = async (req, res) => {
     const { refreshToken } = req.body;
     
     if (!refreshToken) {
+      logger.warn('缺少刷新令牌');
       return res.status(400).json({
         success: false,
         message: '刷新令牌是必需的'
       });
     }
     
+    logger.debug(`尝试刷新令牌: ${refreshToken.substring(0, 15)}...`);
+    
     // 验证刷新令牌
     let decoded;
     try {
       decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+      logger.debug(`刷新令牌验证成功，用户ID: ${decoded.id}`);
     } catch (error) {
+      logger.warn(`令牌验证失败: ${error.message}`);
       return res.status(401).json({
         success: false,
         message: '无效或过期的刷新令牌'
@@ -345,9 +337,31 @@ exports.refreshToken = async (req, res) => {
     }
     
     // 查找用户并检查刷新令牌是否匹配
+    // 使用 .select('+refreshToken') 明确选择 refreshToken 字段
     const user = await User.findById(decoded.id);
     
-    if (!user || user.refreshToken !== refreshToken) {
+    if (!user) {
+      logger.warn(`找不到用户: ${decoded.id}`);
+      return res.status(401).json({
+        success: false,
+        message: '无效的刷新令牌'
+      });
+    }
+    
+    logger.debug(`找到用户: ${user.email}, 刷新令牌: ${user.refreshToken ? '存在' : '不存在'}`);
+    
+    // 直接检查数据库中的refreshToken
+    if (!user.refreshToken) {
+      logger.warn(`用户没有刷新令牌: ${user.email}`);
+      return res.status(401).json({
+        success: false,
+        message: '无效的刷新令牌'
+      });
+    }
+    
+    if (user.refreshToken !== refreshToken) {
+      logger.warn(`刷新令牌不匹配: ${user.email}`);
+      logger.debug(`数据库令牌: ${user.refreshToken.substring(0, 10)}..., 请求令牌: ${refreshToken.substring(0, 10)}...`);
       return res.status(401).json({
         success: false,
         message: '无效的刷新令牌'
@@ -356,13 +370,14 @@ exports.refreshToken = async (req, res) => {
     
     // 生成新令牌
     const token = user.generateAuthToken();
+    logger.info(`刷新令牌成功: ${user.email}`);
     
     res.status(200).json({
       success: true,
       token
     });
   } catch (error) {
-    console.error('令牌刷新错误:', error);
+    logger.error(`刷新令牌错误: ${error.message}`);
     res.status(500).json({
       success: false,
       message: '服务器错误',
@@ -484,19 +499,7 @@ exports.forgotPassword = async (req, res) => {
           email: user.email,
           resetCode: resetCode,
           appName: appName
-        }),
-        attachments: [
-          {
-            filename: 'logo.png',
-            path: path.join(__dirname, '../../logo.png'),
-            cid: 'logo'
-          },
-          {
-            filename: 'logo-small.png',
-            path: path.join(__dirname, '../../logo.png'),
-            cid: 'logo-small'
-          }
-        ]
+        })
       });
       
       logger.info(`密码重置邮件已发送至 ${user.email}`);

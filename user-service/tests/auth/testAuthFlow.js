@@ -5,6 +5,9 @@ const axios = require('axios');
 const dotenv = require('dotenv');
 const readline = require('readline');
 
+// 设置axios默认超时时间
+axios.defaults.timeout = 10000;
+
 // 加载环境变量
 dotenv.config();
 
@@ -30,19 +33,20 @@ const USER_BASE_URL = `${API_BASE_URL}/users`;
 
 console.log(`使用API地址: ${API_BASE_URL}`);
 
-// 生成随机用户信息
-const generateRandomUser = () => {
+// 生成测试用户数据
+function generateTestUser() {
   const timestamp = Date.now();
   return {
     username: `testuser_${timestamp}`,
-    email: `test${timestamp}@example.com`,
-    password: 'Password123!'
+    email: `testuser${timestamp}@example.com`,
+    password: 'Password123!',
+    verificationCode: '123456' // 仅用于测试
   };
-};
+}
 
 // 存储测试中使用的数据
 const testData = {
-  user: generateRandomUser(),
+  user: generateTestUser(),
   tokens: {},
   mfaSecret: '',
   mfaEnabled: false,
@@ -103,7 +107,7 @@ async function verifyEmail() {
     console.log('尝试直接连接到MongoDB更新用户验证状态...');
     
     const { MongoClient } = require('mongodb');
-    const uri = 'mongodb://localhost:27018/user-service';
+    const uri = 'mongodb://localhost:27017/user-service';
     
     let client = null;
     let dbUpdateSuccess = false;
@@ -253,7 +257,7 @@ async function testLogin() {
 
 // 3. 测试开启MFA
 async function testEnableMFA() {
-  console.log('\n========== 测试开启MFA ==========');
+  console.log('\n========== 测试切换MFA ==========');
   
   if (!testData.tokens.accessToken) {
     console.log('× 没有访问令牌，无法启用MFA');
@@ -267,31 +271,15 @@ async function testEnableMFA() {
     };
     
     console.log(`请求头: ${JSON.stringify(config.headers, null, 2)}`);
-    console.log(`请求体: ${JSON.stringify({ enable: true }, null, 2)}`);
+    console.log(`请求体: ${JSON.stringify({}, null, 2)}`);
     
-    const response = await axios.post(`${AUTH_BASE_URL}/toggle-mfa`, { enable: true }, config);
+    const response = await axios.post(`${AUTH_BASE_URL}/toggle-mfa`, {}, config);
     console.log('✓ MFA配置成功:', JSON.stringify(response.data, null, 2));
     
-    if (response.data.mfaSecret) {
-      testData.mfaSecret = response.data.mfaSecret;
-      testData.mfaEnabled = true;
-      
-      // 显示MFA设置信息
-      console.log('\nMFA已启用!');
-      console.log('====================');
-      console.log(`密钥: ${testData.mfaSecret}`);
-      if (response.data.qrCodeUrl) {
-        console.log(`二维码URL: ${response.data.qrCodeUrl}`);
-      }
-      console.log('====================');
-      console.log('请使用Google Authenticator或其他MFA应用扫描二维码或输入密钥。');
-      console.log('然后在下一步输入验证码进行验证。');
-      
-      return true;
-    } else {
-      console.log('MFA启用成功，但未接收到密钥信息');
-      return false;
-    }
+    const isEnabled = response.data.isTwoFactorEnabled;
+    console.log(`MFA当前状态: ${isEnabled ? '已启用' : '已禁用'}`);
+    
+    return true;
   } catch (error) {
     console.error('× 启用MFA失败:');
     if (error.response) {

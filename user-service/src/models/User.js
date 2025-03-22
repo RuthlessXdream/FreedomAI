@@ -52,7 +52,10 @@ const userSchema = new mongoose.Schema(
     mfaCode: String,
     mfaExpire: Date,
     lastLogin: Date,
-    refreshToken: String,
+    refreshToken: {
+      type: String,
+      default: null
+    },
     twoFactorSecret: String,
     isTwoFactorEnabled: {
       type: Boolean,
@@ -76,8 +79,8 @@ const userSchema = new mongoose.Schema(
 
 // 保存前加密密码
 userSchema.pre('save', async function (next) {
-  // 只有密码被修改时才加密
-  if (!this.isModified('password')) return next();
+  // 只有密码存在且被修改时才加密
+  if (!this.isModified('password') || !this.password) return next();
   
   try {
     const salt = await bcrypt.genSalt(10);
@@ -90,6 +93,10 @@ userSchema.pre('save', async function (next) {
 
 // 比较密码
 userSchema.methods.comparePassword = async function (candidatePassword) {
+  // 如果没有提供候选密码或当前密码不存在，返回false
+  if (!candidatePassword || !this.password) {
+    return false;
+  }
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
@@ -103,15 +110,23 @@ userSchema.methods.generateAuthToken = function () {
 };
 
 // 生成刷新令牌
-userSchema.methods.generateRefreshToken = function () {
-  const refreshToken = jwt.sign(
-    { id: this._id },
-    process.env.JWT_REFRESH_SECRET,
-    { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN }
-  );
-  
-  this.refreshToken = refreshToken;
-  return refreshToken;
+userSchema.methods.generateRefreshToken = async function () {
+  try {
+    const refreshToken = jwt.sign(
+      { id: this._id },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN }
+    );
+    
+    // 直接保存到数据库
+    this.refreshToken = refreshToken;
+    await this.save({ validateBeforeSave: false });
+    
+    return refreshToken;
+  } catch (error) {
+    console.error('生成刷新令牌错误:', error);
+    throw error;
+  }
 };
 
 // 检查用户是否应该被锁定

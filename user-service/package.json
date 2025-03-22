@@ -14,7 +14,15 @@
     "test:email": "node tests/email/testEmails.js",
     "send-test-email": "node tests/email/sendTestEmail.js",
     "utils:cleanup": "node tests/utils/cleanupUsers.js",
-    "utils:delete-user": "node tests/utils/deleteUser.js"
+    "utils:delete-user": "node tests/utils/deleteUser.js",
+    "config": "node scripts/config_manager.js",
+    "config:list": "node scripts/config_manager.js list",
+    "config:get": "node scripts/config_manager.js get",
+    "config:set": "node scripts/config_manager.js set",
+    "register": "node tests/register_test_user.js",
+    "verify": "node tests/verify_email.js",
+    "test:refresh": "node tests/auth/testRefreshToken.js",
+    "test:comprehensive": "node tests/comprehensive-test.js"
   },
   "keywords": [
     "user-management",
