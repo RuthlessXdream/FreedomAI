@@ -9,6 +9,15 @@ const dotenv = require('dotenv');
 // 路由
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
+const auditLogRoutes = require('./routes/auditLogRoutes');
+const deviceRoutes = require('./routes/deviceRoutes');
+
+// 添加日志确认路由已加载
+console.log('加载的路由模块:');
+console.log('- authRoutes:', Object.keys(authRoutes).length > 0 ? '已加载' : '加载失败');
+console.log('- userRoutes:', Object.keys(userRoutes).length > 0 ? '已加载' : '加载失败');
+console.log('- auditLogRoutes:', Object.keys(auditLogRoutes).length > 0 ? '已加载' : '加载失败');
+console.log('- deviceRoutes:', Object.keys(deviceRoutes).length > 0 ? '已加载' : '加载失败');
 
 // 加载环境变量
 dotenv.config();
@@ -61,6 +70,8 @@ app.use(express.urlencoded({ extended: false }));
 const apiPrefix = process.env.API_PREFIX || '/api';
 app.use(`${apiPrefix}/auth`, authRoutes);
 app.use(`${apiPrefix}/users`, userRoutes);
+app.use(`${apiPrefix}/audit-logs`, auditLogRoutes);
+app.use(`${apiPrefix}/devices`, deviceRoutes);
 
 // 健康检查路由
 app.get('/health', (req, res) => {

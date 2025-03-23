@@ -27,6 +27,12 @@ server_fixed2.log
 *_test_results_*.log
 test_results/
 
+# 测试输出文件
+tests/*/output/
+tests/*/*.csv
+tests/*/*.json
+tests/*/*.txt
+
 # 临时脚本
 hash.js
 hash2.js

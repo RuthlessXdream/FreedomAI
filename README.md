@@ -27,6 +27,7 @@ FreedomAI/
 - 用户信息管理
 - 账户锁定（防止暴力破解）
 - 权限管理与RBAC
+- 完整的审计日志系统（记录用户活动与系统操作）
 
 详细文档请参阅 [用户服务README](./user-service/README.md)
 
@@ -71,7 +72,11 @@ npm run dev
 ```bash
 # 用户服务
 cd user-service
-npm run dev
+./tools/setup/start.sh
+
+# 或者使用测试环境
+cd user-service
+./tools/setup/setup-test-env.sh
 
 # 客户端
 cd client

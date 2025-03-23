@@ -2,6 +2,7 @@ const express = require('express');
 const { body } = require('express-validator');
 const authController = require('../controllers/authController');
 const { protect } = require('../middlewares/authMiddleware');
+const { createAuditLog } = require('../middlewares/auditLogMiddleware');
 
 const router = express.Router();
 
@@ -72,6 +73,7 @@ router.post(
       .exists()
       .withMessage('请提供密码')
   ],
+  createAuditLog('LOGIN_SUCCESS'),
   authController.login
 );
 
@@ -82,7 +84,7 @@ router.post('/verify-mfa', authController.verifyMFA);
 router.post('/refresh-token', authController.refreshToken);
 
 // 用户注销
-router.post('/logout', protect, authController.logout);
+router.post('/logout', protect, createAuditLog('LOGOUT'), authController.logout);
 
 // 验证邮箱
 router.get('/verify-email/:token', authController.verifyEmail);
@@ -113,6 +115,7 @@ router.put(
       .isLength({ min: 6 })
       .withMessage('密码长度至少为6个字符')
   ],
+  createAuditLog('PASSWORD_RESET'),
   authController.resetPassword
 );
 
@@ -124,10 +127,11 @@ router.post(
     body('resetCode').exists().withMessage('请提供重置验证码'),
     body('newPassword').isLength({ min: 6 }).withMessage('密码长度至少为6个字符')
   ],
+  createAuditLog('PASSWORD_RESET'),
   authController.resetPasswordWithCode
 );
 
 // 开启/关闭双因素认证
-router.post('/toggle-mfa', protect, authController.toggleMFA);
+router.post('/toggle-mfa', protect, createAuditLog('MFA_TOGGLE'), authController.toggleMFA);
 
 module.exports = router;

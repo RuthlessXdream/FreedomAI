@@ -153,95 +153,220 @@ exports.login = async (req, res) => {
       });
     }
     
-    // 检查用户是否存在
+    // 获取用户IP和用户代理信息
+    const ipAddress = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip;
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    
+    // 查找用户
     const user = await User.findOne({ email }).select('+password');
     
-    if (!user) {
+    // 用户不存在或密码不匹配
+    if (!user || !(await user.comparePassword(password))) {
+      // 记录失败的登录尝试
+      if (user) {
+        await user.incLoginAttempts();
+        
+        // 记录登录失败审计日志
+        const auditLogService = require('../services/auditLogService');
+        auditLogService.createLog({
+          userId: user._id,
+          username: user.username,
+          action: 'LOGIN_FAILED',
+          ipAddress,
+          userAgent,
+          details: {
+            reason: '密码不正确',
+            email
+          }
+        });
+      }
+      
       return res.status(401).json({
         success: false,
-        message: '无效的凭据'
+        message: '邮箱或密码不正确'
       });
     }
     
     // 检查账户是否被锁定
-    if (user.isLocked && user.lockUntil > Date.now()) {
-      return res.status(401).json({
-        success: false,
-        message: `账户已锁定，请在${Math.ceil((user.lockUntil - Date.now()) / 1000 / 60)}分钟后重试`
-      });
+    if (user.isLocked) {
+      if (user.lockUntil && user.lockUntil > Date.now()) {
+        return res.status(401).json({
+          success: false,
+          message: `账户已被锁定，请在${Math.ceil((user.lockUntil - Date.now()) / 1000 / 60)}分钟后重试`
+        });
+      } else {
+        // 锁定时间已过，重置锁定状态
+        user.isLocked = false;
+        user.loginAttempts = 0;
+        user.lockUntil = undefined;
+        await user.save({ validateBeforeSave: false });
+      }
     }
     
-    // 检查密码是否正确
-    const isMatch = await user.comparePassword(password);
-    
-    if (!isMatch) {
-      await user.incLoginAttempts();
-      
-      return res.status(401).json({
-        success: false,
-        message: '无效的凭据',
-        remainingAttempts: Math.max(0, 5 - (user.loginAttempts + 1))
-      });
-    }
-    
-    // 重置登录尝试次数
-    await user.resetLoginAttempts();
-    
-    // 检查邮箱是否已验证（如需跳过验证，可删除此检查）
+    // 检查账户是否已验证
     if (!user.isVerified) {
       return res.status(401).json({
         success: false,
-        message: '请先验证您的电子邮件'
+        message: '此账户尚未验证邮箱，请先验证邮箱'
       });
     }
-
-    // 如果启用了MFA，则发送MFA验证码
+    
+    // 检查是否启用了双因素认证
     if (user.isTwoFactorEnabled) {
-      // 使用自定义MFA码或生成新的MFA码
-      const mfaCode = customMfaCode || generateCode(6);
-      const mfaExpire = Date.now() + 5 * 60 * 1000; // 5分钟有效期
+      // 如果没有提供MFA代码，返回需要MFA的状态
+      if (!customMfaCode) {
+        // 生成新的MFA验证码
+        const mfaCode = generateCode(6);
+        user.mfaCode = mfaCode;
+        user.mfaExpire = Date.now() + 10 * 60 * 1000; // 10分钟有效期
+        await user.save({ validateBeforeSave: false });
+        
+        // 发送MFA验证码邮件
+        try {
+          const result = await emailService.transporter.sendMail({
+            from: `"${emailService.config.from.name}" <${emailService.config.from.email}>`,
+            to: user.email,
+            subject: '安全登录验证码',
+            html: `<p>您的安全登录验证码是: <strong>${mfaCode}</strong>，10分钟内有效。</p>
+                  <p>如果这不是您的操作，请立即修改密码。</p>`
+          });
+          
+          logger.info(`MFA验证码已发送至 ${user.email}, MessageID: ${result.messageId}`);
+        } catch (emailError) {
+          logger.error(`发送MFA验证码邮件失败: ${emailError.message}`);
+        }
+        
+        // 在开发环境中返回MFA代码（方便测试）
+        const response = {
+          success: true,
+          requireMFA: true,
+          message: '需要双因素认证，请输入验证码'
+        };
+        
+        if (process.env.NODE_ENV === 'development') {
+          response.mfaCode = mfaCode;
+        }
+        
+        return res.status(200).json(response);
+      }
       
-      user.mfaCode = mfaCode;
-      user.mfaExpire = mfaExpire;
-      await user.save({ validateBeforeSave: false });
+      // 验证MFA代码
+      if (!user.mfaCode || !user.mfaExpire || user.mfaExpire < Date.now()) {
+        return res.status(400).json({
+          success: false,
+          message: 'MFA验证码已过期，请重新请求'
+        });
+      }
       
-      // 发送MFA验证邮件
-      const appName = process.env.APP_NAME || 'FREEDOM AI 用户认证系统';
+      if (user.mfaCode !== customMfaCode) {
+        return res.status(400).json({
+          success: false,
+          message: 'MFA验证码不正确'
+        });
+      }
+      
+      // MFA验证通过，清除MFA数据
+      user.mfaCode = undefined;
+      user.mfaExpire = undefined;
+    }
+    
+    // 重置登录尝试次数
+    user.loginAttempts = 0;
+    user.isLocked = false;
+    user.lockUntil = undefined;
+    
+    // 记录设备信息
+    const deviceService = require('../services/deviceService');
+    const device = await deviceService.recordDeviceLogin(user._id, userAgent, ipAddress);
+    
+    // 检查是否是可疑登录
+    const suspiciousCheck = await deviceService.checkSuspiciousLogin(user._id, ipAddress, userAgent);
+    
+    // 如果是可疑登录，发送安全通知邮件
+    if (suspiciousCheck.isSuspicious) {
       try {
-        await emailService.transporter.sendMail({
-          from: `"${emailService.config.from.name}" <${emailService.config.from.email}>`,
+        // 获取设备信息
+        const parser = new (require('ua-parser-js'))(userAgent);
+        const deviceInfo = parser.getResult();
+        
+        // 准备邮件内容
+        const browser = deviceInfo.browser.name ? `${deviceInfo.browser.name} ${deviceInfo.browser.version}` : '未知浏览器';
+        const os = deviceInfo.os.name ? `${deviceInfo.os.name} ${deviceInfo.os.version}` : '未知操作系统';
+        const suspiciousReasons = [];
+        
+        if (suspiciousCheck.isNewDevice) suspiciousReasons.push('新设备登录');
+        if (suspiciousCheck.isUnusualIP) suspiciousReasons.push('不常用IP地址');
+        if (suspiciousCheck.isUnusualBrowser) suspiciousReasons.push('不常用浏览器');
+        
+        const reasonText = suspiciousReasons.join('、');
+        
+        // 发送安全警告邮件
+        const result = await emailService.transporter.sendMail({
+          from: `"${emailService.config.from.name} 安全中心" <${emailService.config.from.email}>`,
           to: user.email,
-          subject: emailService.config.templates.mfaVerification.subject,
-          html: handlebars.compile(emailService.config.templates.mfaVerification.body)({
-            email: user.email,
-            mfaCode: mfaCode,
-            expireMinutes: 5,
-            appName: appName
-          })
+          subject: '【安全警告】检测到可疑的账户登录',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+              <h2 style="color: #d9534f;">【安全警告】检测到可疑的账户登录</h2>
+              <p>我们检测到一次来自新设备或不常用位置的登录活动。如果这是您本人操作，请忽略此邮件。</p>
+              
+              <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                <h3 style="margin-top: 0;">登录详情：</h3>
+                <p><strong>时间：</strong> ${new Date().toLocaleString('zh-CN')}</p>
+                <p><strong>IP地址：</strong> ${ipAddress}</p>
+                <p><strong>浏览器：</strong> ${browser}</p>
+                <p><strong>操作系统：</strong> ${os}</p>
+                <p><strong>可疑原因：</strong> ${reasonText}</p>
+              </div>
+              
+              <p>如果这不是您的操作，您的账户可能已被盗用。请立即采取以下措施：</p>
+              <ol>
+                <li>立即修改密码</li>
+                <li>启用双因素认证</li>
+                <li>检查并移除不信任的登录设备</li>
+                <li>联系我们的客服团队</li>
+              </ol>
+              
+              <p style="padding-top: 15px; border-top: 1px solid #e0e0e0; font-size: 12px; color: #777;">
+                此邮件由系统自动发送，请勿回复。如有疑问，请联系客服。
+              </p>
+            </div>
+          `
         });
         
-        logger.info(`MFA验证邮件已发送至 ${user.email}`);
+        logger.info(`可疑登录安全通知已发送至 ${user.email}, MessageID: ${result.messageId}`);
       } catch (emailError) {
-        logger.error(`发送MFA验证邮件失败: ${emailError.message}`);
+        logger.error(`发送可疑登录通知邮件失败: ${emailError.message}`);
+        // 邮件发送失败不影响登录流程
       }
-      
-      // 在响应中包含MFA码（仅在测试环境中）
-      const responseData = {
-        success: true,
-        message: '需要MFA验证，验证码已发送到您的邮箱',
-        requireMFA: true,
-        userId: user._id
-      };
-      
-      if (process.env.NODE_ENV === 'development') {
-        responseData.mfaCode = mfaCode;
-      }
-      
-      return res.status(200).json(responseData);
     }
     
     // 创建并发送令牌
     await createSendToken(user, 200, res);
+    
+    // 记录登录成功审计日志
+    const auditLogService = require('../services/auditLogService');
+    auditLogService.createLog({
+      userId: user._id,
+      username: user.username,
+      action: 'LOGIN_SUCCESS',
+      ipAddress,
+      userAgent,
+      details: {
+        device: {
+          id: device._id,
+          deviceType: device.deviceType,
+          browser: device.browser
+        },
+        suspicious: suspiciousCheck
+      }
+    });
+    
+    // 如果是可疑登录，在响应中添加警告
+    if (suspiciousCheck.isSuspicious) {
+      res.append('X-Login-Suspicious', 'true');
+      res.append('X-Suspicious-Score', suspiciousCheck.suspicionScore);
+    }
   } catch (error) {
     logger.error(`登录错误: ${error.message}`);
     res.status(500).json({

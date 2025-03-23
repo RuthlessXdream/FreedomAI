@@ -1,166 +1,42 @@
-# FREEDOM AI 用户认证系统
+## 审计日志系统
 
-FREEDOM AI 用户认证系统是一个全功能的用户认证和授权服务，提供用户注册、登录、令牌刷新、MFA认证等功能。
+FreedomAI用户服务包括完整的审计日志系统，用于记录和监控用户操作和系统活动。
 
-## 功能特性
+### 主要功能
 
-- 用户注册与邮箱验证
-- 用户登录与JWT令牌认证
-- 刷新令牌机制（支持长时间会话）
-- 多因素认证 (MFA)
-- 密码重置流程
-- 用户信息管理
-- 账户锁定（防止暴力破解）
-- 权限管理与RBAC
+- **完整的操作记录**：记录所有用户登录、注册、修改个人信息等操作
+- **详细的日志信息**：包括操作时间、用户ID、IP地址、用户代理等信息
+- **用户操作历史**：支持按用户ID查询操作历史
+- **数据导出**：支持将审计日志导出为CSV格式
+- **权限控制**：只有管理员可以访问审计日志
 
-## 技术栈
+### API端点
 
-- **后端框架**: Node.js + Express
-- **数据库**: MongoDB + Mongoose
-- **认证**: JWT (JSON Web Tokens)
-- **邮件服务**: Nodemailer
-- **安全**: bcryptjs, helmet, 速率限制
-- **日志**: Winston
+| 端点 | 方法 | 描述 | 需要权限 |
+|------|------|------|---------|
+| `/api/audit-logs` | GET | 获取审计日志列表 | 管理员 |
+| `/api/audit-logs/:id` | GET | 获取特定日志详情 | 管理员 |
+| `/api/audit-logs/user/:userId` | GET | 获取指定用户的操作历史 | 管理员 |
+| `/api/audit-logs/summary` | GET | 获取审计日志摘要统计 | 管理员 |
+| `/api/audit-logs/export` | GET | 导出审计日志为CSV文件 | 管理员 |
 
-## 安装与运行
+### 测试
 
-### 前置条件
+项目包含完整的测试套件，用于验证审计日志系统的功能和性能：
 
-- Node.js (v14+)
-- MongoDB (v4+)
-- npm 或 yarn
-
-### 安装步骤
-
-1. 克隆仓库
+1. **功能测试**：验证所有API端点的功能和权限控制
    ```bash
-   git clone https://github.com/your-org/freedom-ai-user-service.git
-   cd freedom-ai-user-service
+   # 初始化测试环境
+   ./tools/setup/setup-test-env.sh
+   
+   # 运行功能测试
+   node tests/audit/real-test.js
    ```
 
-2. 安装依赖
+2. **性能测试**：测试系统在高负载下的表现
    ```bash
-   npm install
-   # 或
-   yarn install
+   # 运行性能测试
+   node tests/audit/performance-test-real.js
    ```
 
-3. 配置环境变量
-   ```bash
-   cp .env.example .env
-   # 然后编辑.env文件设置你的环境变量
-   ```
-
-4. 启动服务
-   ```bash
-   npm start
-   # 或开发模式
-   npm run dev
-   ```
-
-## 系统配置
-
-系统配置主要分为两部分：环境变量配置和SMTP邮件配置。
-
-### 配置管理
-
-我们提供了便捷的配置管理工具，可以通过以下命令管理配置：
-
-```bash
-# 查看所有配置
-npm run config:list
-
-# 查看特定配置
-npm run config:get JWT_SECRET
-
-# 修改配置
-npm run config:set PORT 3003
-```
-
-### 环境变量配置 (.env)
-
-主要配置参数：
-
-#### 服务器配置
-- `NODE_ENV`: 运行环境 (development/production)
-- `PORT`: 服务器端口
-- `HOST`: 服务器主机名
-
-#### 数据库配置
-- `MONGODB_URI`: MongoDB连接URI
-- `MONGODB_TEST_URI`: 测试用MongoDB连接URI
-
-#### JWT配置
-- `JWT_SECRET`: JWT加密密钥
-- `JWT_EXPIRES_IN`: JWT有效期
-- `JWT_REFRESH_SECRET`: 刷新令牌密钥
-- `JWT_REFRESH_EXPIRES_IN`: 刷新令牌有效期
-
-#### 邮件服务配置
-- `MAIL_HOST`: SMTP服务器地址
-- `MAIL_PORT`: SMTP服务器端口
-- `MAIL_USER`: SMTP用户名
-- `MAIL_PASSWORD`: SMTP密码
-- `MAIL_FROM`: 发件人地址
-
-### SMTP邮件配置 (config/smtp.config.js)
-
-这个文件包含邮件服务的详细配置，包括：
-
-- SMTP服务器设置
-- 邮件模板（验证邮件、密码重置、MFA验证等）
-- 发件人信息
-
-## API接口
-
-### 认证相关
-
-- `POST /api/auth/register` - 用户注册
-- `POST /api/auth/verify-email` - 验证邮箱
-- `POST /api/auth/login` - 用户登录
-- `POST /api/auth/verify-mfa` - 验证MFA
-- `POST /api/auth/refresh-token` - 刷新访问令牌
-- `POST /api/auth/logout` - 用户注销
-- `POST /api/auth/password-reset` - 请求密码重置
-- `POST /api/auth/password-reset/verify` - 验证密码重置
-- `POST /api/auth/toggle-mfa` - 开启/关闭MFA
-
-### 用户相关
-
-- `GET /api/users/profile` - 获取用户信息
-- `PUT /api/users/profile` - 更新用户信息
-- `GET /api/users` - 获取用户列表 (仅管理员)
-- `GET /api/users/:id` - 获取特定用户 (仅管理员)
-- `DELETE /api/users/:id` - 删除用户 (仅管理员)
-
-## 测试
-
-系统提供了多种测试脚本：
-
-```bash
-# 运行所有测试
-npm test
-
-# 测试刷新令牌功能
-npm run test:refresh
-
-# 综合功能测试
-npm run test:comprehensive
-
-# 为测试用户注册账号
-npm run register your-email@example.com
-
-# 验证测试用户邮箱
-npm run verify your-email@example.com verification-code
-```
-
-## 安全注意事项
-
-- 生产环境下请使用强密钥
-- 定期更换JWT密钥
-- 使用HTTPS保护API通信
-- 避免在代码库中存储敏感信息
-
-## 许可证
-
-MIT
+性能测试结果将保存在 `tests/audit/output/` 目录下。 
