@@ -11,7 +11,7 @@ const crypto = require('crypto');
 
 // 配置
 const config = {
-  baseUrl: 'http://localhost:3000', // API服务器地址
+  baseUrl: 'http://localhost:3002', // API服务器地址
   loginEndpoint: '/api/auth/login',
   auditLogEndpoint: '/api/audit-logs',
   auditLogDetailsEndpoint: '/api/audit-logs/',
@@ -21,12 +21,12 @@ const config = {
   // 测试管理员账户，需要有权限访问审计日志API
   adminCredentials: {
     email: 'admin@example.com',
-    password: 'admin123',
+    password: 'Admin@123',
   },
   testIterations: 50, // 每个API的测试次数
   concurrentRequests: 5, // 并发请求数
   outputDir: path.join(__dirname, 'output'),
-  outputFile: `performance_test_${Date.now()}.json`,
+  outputFile: `performance_results_${Date.now()}.json`,
 };
 
 // 确保输出目录存在
@@ -81,11 +81,24 @@ async function authenticate() {
   try {
     console.log('尝试认证...');
     const response = await axios.post(`${config.baseUrl}${config.loginEndpoint}`, config.adminCredentials);
-    const { accessToken } = response.data;
+    
+    // 根据实际API响应格式获取token
+    console.log('认证响应结构:', Object.keys(response.data));
+    const token = response.data.token || response.data.accessToken;
+    
+    if (!token) {
+      console.error('响应中没有找到token:', response.data);
+      throw new Error('响应中没有找到token');
+    }
+    
     console.log('认证成功');
-    return accessToken;
+    return token;
   } catch (error) {
     console.error('认证失败:', error.message);
+    if (error.response) {
+      console.error('错误状态码:', error.response.status);
+      console.error('错误详情:', error.response.data);
+    }
     throw new Error('无法获取访问令牌');
   }
 }

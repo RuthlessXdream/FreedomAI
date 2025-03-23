@@ -10,7 +10,7 @@ const chalk = require('chalk');
 
 // 配置
 const config = {
-  baseUrl: 'http://localhost:3000', // API服务器地址
+  baseUrl: 'http://localhost:3002', // API服务器地址
   loginEndpoint: '/api/auth/login',
   auditLogEndpoint: '/api/audit-logs',
   auditLogDetailsEndpoint: '/api/audit-logs/',
@@ -20,7 +20,7 @@ const config = {
   // 测试管理员账户
   adminCredentials: {
     email: 'admin@example.com',
-    password: 'admin123',
+    password: 'Admin@123',
   },
   outputDir: path.join(__dirname, 'output'),
 };
@@ -55,11 +55,19 @@ async function authenticate() {
   log('尝试使用管理员账户登录...');
   try {
     const response = await axios.post(`${config.baseUrl}${config.loginEndpoint}`, config.adminCredentials);
-    const { accessToken, user } = response.data;
+    // 打印响应数据
+    console.log("认证响应:", JSON.stringify(response.data, null, 2));
+    
+    // 尝试从响应中获取token和用户信息
+    const { token, user } = response.data;
     log(`认证成功! 用户: ${user.email} (ID: ${user._id})`, 'success');
-    return { accessToken, userId: user._id };
+    return { accessToken: token, userId: user._id };
   } catch (error) {
     log(`认证失败: ${error.message}`, 'error');
+    if (error.response) {
+      log(`响应状态: ${error.response.status}`, 'error');
+      log(`响应数据: ${JSON.stringify(error.response.data)}`, 'error');
+    }
     throw new Error('无法获取访问令牌');
   }
 }
@@ -72,15 +80,18 @@ async function testGetAuditLogs(accessToken) {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     
-    const { logs, pagination } = response.data;
+    const logs = response.data.logs || response.data; // 兼容不同格式
+    const pagination = response.data.pagination || {};
     log(`成功获取审计日志列表! 获取到 ${logs.length} 条记录`, 'success');
-    log(`分页信息: 当前页 ${pagination.currentPage}, 总页数 ${pagination.totalPages}, 总记录数 ${pagination.totalItems}`);
+    log(`分页信息: 当前页 ${pagination.currentPage || 1}, 总页数 ${pagination.totalPages || '未知'}, 总记录数 ${pagination.totalItems || '未知'}`);
     
     // 输出示例记录
     if (logs.length > 0) {
       log('示例记录:');
-      logs.slice(0, 3).forEach((log, index) => {
-        console.log(`  ${index + 1}. [${log.action}] ${log.description} - ${new Date(log.timestamp).toLocaleString()}`);
+      logs.slice(0, 3).forEach((logItem, index) => {
+        const date = new Date(logItem.createdAt || logItem.timestamp).toLocaleString();
+        const desc = logItem.description || logItem.action;
+        console.log(`  ${index + 1}. [${logItem.action}] ${desc} - ${date}`);
       });
     }
     
@@ -99,15 +110,21 @@ async function testGetAuditLogDetails(accessToken, logId) {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     
-    const logDetails = response.data.log;
+    const logDetails = response.data.log || response.data; // 兼容不同格式
     log(`成功获取审计日志详情!`, 'success');
     log('日志详情:');
     console.log(`  操作: ${logDetails.action}`);
-    console.log(`  描述: ${logDetails.description}`);
+    console.log(`  描述: ${logDetails.description || '未提供'}`);
     console.log(`  用户: ${logDetails.userId}`);
-    console.log(`  IP地址: ${logDetails.ipAddress}`);
-    console.log(`  时间: ${new Date(logDetails.timestamp).toLocaleString()}`);
-    console.log(`  详细数据: ${JSON.stringify(logDetails.details, null, 2)}`);
+    console.log(`  IP地址: ${logDetails.ipAddress || logDetails.ip || '未记录'}`);
+    
+    // 处理时间戳
+    const timestamp = logDetails.createdAt || logDetails.timestamp;
+    const date = timestamp ? new Date(timestamp).toLocaleString() : '未知时间';
+    console.log(`  时间: ${date}`);
+    
+    // 格式化展示详情数据
+    console.log(`  详细数据: ${JSON.stringify(logDetails.details || {}, null, 2)}`);
     
     return logDetails;
   } catch (error) {
@@ -124,14 +141,21 @@ async function testGetUserHistory(accessToken, userId) {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     
-    const { logs } = response.data;
+    const logs = response.data.logs || response.data; // 兼容不同格式
+    if (!Array.isArray(logs)) {
+      log(`返回的数据不是数组格式: ${JSON.stringify(response.data).slice(0, 100)}...`, 'warn');
+      return [];
+    }
+    
     log(`成功获取用户操作历史! 获取到 ${logs.length} 条记录`, 'success');
     
     // 输出示例记录
     if (logs.length > 0) {
       log('用户最近操作:');
-      logs.slice(0, 5).forEach((log, index) => {
-        console.log(`  ${index + 1}. [${log.action}] ${log.description} - ${new Date(log.timestamp).toLocaleString()}`);
+      logs.slice(0, 5).forEach((logItem, index) => {
+        const date = new Date(logItem.createdAt || logItem.timestamp).toLocaleString();
+        const desc = logItem.description || logItem.action;
+        console.log(`  ${index + 1}. [${logItem.action}] ${desc} - ${date}`);
       });
     } else {
       log('该用户暂无操作记录', 'warn');
@@ -155,13 +179,38 @@ async function testGetAuditLogSummary(accessToken) {
     const summary = response.data.summary;
     log(`成功获取审计日志摘要!`, 'success');
     log('摘要信息:');
-    console.log(`  总操作数: ${summary.totalActions}`);
-    console.log(`  用户操作分布:`);
-    for (const [action, count] of Object.entries(summary.actionCounts)) {
-      console.log(`    ${action}: ${count} 次`);
+    
+    // 总活动数
+    if (summary.recentActivities && summary.recentActivities.totalActivities) {
+      console.log(`  总活动数: ${summary.recentActivities.totalActivities}`);
+      console.log(`  活跃用户数: ${summary.recentActivities.uniqueUsers || 0}`);
+    } else {
+      console.log(`  未找到活动统计数据`);
     }
-    console.log(`  活跃用户数: ${summary.activeUsers}`);
-    console.log(`  最近 24 小时操作数: ${summary.last24Hours}`);
+    
+    // 操作分布
+    console.log(`  操作类型分布:`);
+    if (summary.actionDistribution && Array.isArray(summary.actionDistribution)) {
+      summary.actionDistribution.slice(0, 5).forEach(action => {
+        console.log(`    ${action._id}: ${action.count} 次`);
+      });
+      if (summary.actionDistribution.length > 5) {
+        console.log(`    ... 及其他 ${summary.actionDistribution.length - 5} 种操作类型`);
+      }
+    } else {
+      console.log(`    未找到操作分布数据`);
+    }
+    
+    // 最近日志
+    console.log(`  最近的日志活动:`);
+    if (summary.recentLogs && Array.isArray(summary.recentLogs)) {
+      summary.recentLogs.slice(0, 3).forEach((log, index) => {
+        const date = new Date(log.createdAt || log.timestamp).toLocaleString();
+        console.log(`    ${index + 1}. [${log.action}] 用户: ${log.username || log.userId} - ${date}`);
+      });
+    } else {
+      console.log(`    未找到最近日志数据`);
+    }
     
     return summary;
   } catch (error) {
@@ -179,16 +228,31 @@ async function testExportAuditLogs(accessToken) {
       responseType: 'arraybuffer',
     });
     
-    const outputFile = path.join(config.outputDir, `audit_logs_${Date.now()}.csv`);
+    // 检查响应内容类型
+    const contentType = response.headers['content-type'];
+    if (!contentType || !(contentType.includes('text/csv') || contentType.includes('application/octet-stream'))) {
+      log(`警告：响应内容类型不是CSV (${contentType})`, 'warn');
+    }
+    
+    // 保存文件
+    const outputFile = path.join(config.outputDir, `real_audit_logs_${Date.now()}.csv`);
     fs.writeFileSync(outputFile, response.data);
     
     log(`成功导出审计日志! 文件保存在: ${outputFile}`, 'success');
     
-    // 读取CSV文件的前几行以显示示例
-    const fileContent = fs.readFileSync(outputFile, 'utf8');
-    const lines = fileContent.split('\n').slice(0, 6);
-    log('导出文件预览:');
-    lines.forEach(line => console.log(`  ${line}`));
+    try {
+      // 尝试使用utf8读取文件内容
+      const fileContent = fs.readFileSync(outputFile, 'utf8');
+      const lines = fileContent.split('\n').filter(line => line.trim()).slice(0, 6);
+      
+      log('导出文件预览:');
+      lines.forEach(line => console.log(`  ${line}`));
+      
+      log(`文件包含 ${lines.length} 行数据`, 'info');
+    } catch (readError) {
+      log(`无法以文本方式读取文件: ${readError.message}`, 'warn');
+      log(`文件已保存，但无法预览内容`, 'info');
+    }
     
     return outputFile;
   } catch (error) {
@@ -240,4 +304,11 @@ async function runTests() {
 }
 
 // 运行测试
-runTests(); 
+runTests()
+  .then(() => {
+    console.log('测试脚本执行完毕');
+  })
+  .catch(error => {
+    console.error('测试脚本执行失败:', error);
+    process.exit(1);
+  }); 

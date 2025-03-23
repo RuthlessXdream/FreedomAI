@@ -34,6 +34,13 @@ if ! command -v npm &> /dev/null; then
   exit 1
 fi
 
+if ! command -v curl &> /dev/null; then
+  echo -e "${YELLOW}未找到 curl，将使用替代方法检查服务状态${NC}"
+  HAS_CURL=false
+else
+  HAS_CURL=true
+fi
+
 # 安装依赖
 echo -e "${BLUE}安装依赖...${NC}"
 npm install
@@ -61,6 +68,21 @@ mkdir -p logs
 # 确保测试目录存在
 mkdir -p tests/audit/output
 
+# 检查服务是否已经在运行
+existing_pid=$(lsof -t -i:3002 2>/dev/null)
+if [ ! -z "$existing_pid" ]; then
+  echo -e "${YELLOW}端口3002已被占用，可能服务已在运行。PID: ${existing_pid}${NC}"
+  read -p "是否停止现有服务并重启? (y/n): " stop_existing
+  if [ "$stop_existing" = "y" ]; then
+    echo -e "${BLUE}停止现有服务...${NC}"
+    kill $existing_pid
+    sleep 2
+  else
+    echo -e "${GREEN}保留现有服务运行.${NC}"
+    exit 0
+  fi
+fi
+
 # 启动服务器
 echo -e "${BLUE}启动用户服务...${NC}"
 echo -e "${YELLOW}服务将在后台运行，输出记录到 logs/server.log${NC}"
@@ -69,10 +91,52 @@ SERVER_PID=$!
 
 # 等待服务启动
 echo -e "${BLUE}等待服务启动...${NC}"
-sleep 3
+# 增加等待时间，给服务充分启动的机会
+sleep 5
 
-# 检查服务是否成功启动
-if ps -p $SERVER_PID > /dev/null; then
+# 循环检查服务是否成功启动
+MAX_ATTEMPTS=6
+ATTEMPT=1
+SERVICE_UP=false
+
+while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+  echo -e "${BLUE}检查服务状态 (尝试 $ATTEMPT/$MAX_ATTEMPTS)...${NC}"
+  
+  # 首先检查进程是否存在
+  if ! ps -p $SERVER_PID > /dev/null; then
+    echo -e "${RED}服务进程不存在，启动失败${NC}"
+    break
+  fi
+  
+  # 再检查端口是否监听
+  if ! netstat -tlnp 2>/dev/null | grep -q ":3002"; then
+    echo -e "${YELLOW}服务进程存在但端口3002未监听，等待...${NC}"
+    sleep 2
+    ATTEMPT=$((ATTEMPT+1))
+    continue
+  fi
+  
+  # 最后检查API是否可访问
+  if [ "$HAS_CURL" = true ]; then
+    HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3002/api/health 2>/dev/null)
+    if [ "$HEALTH_CHECK" = "200" ]; then
+      SERVICE_UP=true
+      break
+    else
+      echo -e "${YELLOW}服务端口已监听但API尚未就绪 (状态码: $HEALTH_CHECK)，等待...${NC}"
+    fi
+  else
+    # 如果没有curl，只检查到端口监听就认为成功
+    SERVICE_UP=true
+    break
+  fi
+  
+  sleep 2
+  ATTEMPT=$((ATTEMPT+1))
+done
+
+# 根据检查结果输出信息
+if [ "$SERVICE_UP" = true ]; then
   echo -e "${GREEN}==================================================${NC}"
   echo -e "${GREEN}        用户服务已成功启动!                      ${NC}"
   echo -e "${GREEN}==================================================${NC}"
@@ -87,6 +151,6 @@ if ps -p $SERVER_PID > /dev/null; then
   echo -e "${YELLOW}使用以下命令停止服务:${NC}"
   echo -e "kill $SERVER_PID"
 else
-  echo -e "${RED}服务启动失败，请检查日志:${NC}"
+  echo -e "${RED}服务启动失败或未能在预期时间内就绪，请检查日志:${NC}"
   echo -e "cat logs/server.log"
 fi 
